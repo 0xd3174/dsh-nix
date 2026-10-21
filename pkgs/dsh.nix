@@ -18,12 +18,16 @@
 }:
 
 let
-  version = "0.1.0-rc.5";
+  version = "0.2.1-rc.2";
   pnpmDeps = fetchPnpmDeps {
     pname = "deepseek-harness";
     inherit version src;
     fetcherVersion = 4;
-    hash = "sha256-aySHq0ywTMM5q7YuGHZrV3yQE3bwppgGfWH3wRnHCXk=";
+    pnpmInstallFlags = [
+      "--fetch-timeout=600000"
+      "--fetch-retries=10"
+    ];
+    hash = "sha256-C9Aw9AS4r7zubaEuT6mLXQ+AhhMVlTxPZRKTpzRUkcU=";
   };
 in
 stdenv.mkDerivation {
@@ -48,6 +52,15 @@ stdenv.mkDerivation {
       export npm_config_python=python3
       node-gyp rebuild
     )
+    # node-addon-require-builtin attempts to scan V8 memory dynamically to locate
+    # internal module getters, which fails on Nixpkgs-built Node.js binaries
+    # with `Unsupported/no-getter (x64 sysv getter is not a recognized this->field accessor)`.
+    # Since the CLI wrapper launches Node with `--expose-internals`, try standard
+    # `require(moduleId)` first to load internal modules directly.
+    sed -i 's|function requireBuiltin(moduleId) {|function requireBuiltin(moduleId) { try { return require(moduleId); } catch {}|' \
+      node_modules/.pnpm/node-addon-require-builtin@*/node_modules/node-addon-require-builtin/lib/index.js
+    # Avoid spawning git inside the sandboxed build to query the HEAD commit.
+    export DSH_CLIENT_COMMIT_HASH="687f282"
     pnpm run build
     runHook postBuild
   '';

@@ -28,21 +28,38 @@ const installAnchor = join(install, 'apps/cli/package.json')
 process.env.DSH_HOME = home
 const lib = (pkg) => pathToFileURL(join(install, pkg, 'lib/index.js')).href
 
-const { boot, healProfilesModuleFallback, loadLayeredEnv, loadProfile } =
+const { boot, createRuntimeResolution, loadLayeredEnv, loadProfile, PluginPackages, readProfilePatches } =
   await import(lib('packages/boot/app-boot'))
 const { provideCmdline } = await import(lib('packages/boot/cmdline'))
 const { DSH_LAUNCH_ENVIRONMENT_KEY } =
   await import(lib('packages/util/launch-environment'))
 
-healProfilesModuleFallback(installAnchor, home)
 const profile = loadProfile(NAME, name, installAnchor, home)
 const rootConfig = join(profile.dir, 'cordis.yml')
-const patches = [
-  ...profile.layers.flatMap((layer) => layer.patches),
-  ...profile.patches,
-]
-const ctx = await boot(NAME, rootConfig, patches, (hostCtx) => {
+const resolution = await createRuntimeResolution({ installAnchor, profile, home })
+const profileContext = {
+  name,
+  dir: profile.dir,
+  patchPath: profile.patchPath,
+  installAnchor,
+  startedBundles: profile.layers.map((layer) => layer.packageName),
+  cwd: process.cwd(),
+  home,
+  overlays: [],
+}
+const patches = readProfilePatches
+  ? readProfilePatches(NAME, profileContext, profile)
+  : [
+      ...profile.layers.flatMap((layer) => layer.patches),
+      ...profile.patches,
+    ]
+
+const ctx = await boot(NAME, rootConfig, patches, async (hostCtx) => {
+  hostCtx.provide('profileContext', profileContext)
   hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, loadLayeredEnv(NAME))
+  if (PluginPackages) {
+    await hostCtx.plugin(PluginPackages, { resolution })
+  }
   provideCmdline(hostCtx, { args, exit: () => {} })
 })
 await ctx.fiber.dispose()
